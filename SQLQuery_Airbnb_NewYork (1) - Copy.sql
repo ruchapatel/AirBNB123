@@ -1,200 +1,346 @@
-﻿--Viewing the dataset
----------------------
 select * from DataAnalysis..['listings New York$']
 order by id
-
---Data Cleaning and checking (used substring, replace, cast functions)
-select property_type,cast(replace(substring(price,2,10),',','') as float) as Pricing from DataAnalysis..['listings New York$']
---where property_type='Entire condominium (condo)'
-where cast(replace(substring(price,2,10),',','') as float)>0
-order by Pricing desc
+	
+--Data Cleaning 
+SELECT 
+    property_type,
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) AS Pricing 
+FROM 
+    DataAnalysis..['listings New York$']
+-- WHERE property_type = 'Entire condominium (condo)'
+WHERE 
+    TRY_CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+ORDER BY 
+    Pricing DESC
 
 --Overall Data
-select  count(*) as 'Listings',sum(accommodates) as Accomodations,sum(number_of_reviews) as 'Reviews'
-,round(avg(review_scores_rating),2) as 'Average Ratings',concat('$',round(avg(Pricing),2)) as 'Average Pricing'
-from 
-(
-select *,cast(replace(substring(price,2,10),',','') as float) as Pricing from DataAnalysis..['listings New York$']
-) t
-where Pricing>0
+SELECT  
+    COUNT(*) AS 'Listings',
+    SUM(accommodates) AS Accommodations,
+    SUM(number_of_reviews) AS 'Reviews',
+    ROUND(AVG(review_scores_rating), 2) AS 'Average Ratings',
+    CONCAT('$', ROUND(AVG(Pricing), 2)) AS 'Average Pricing'
+FROM 
+    (
+    SELECT 
+        *,
+        CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) AS Pricing 
+    FROM 
+        DataAnalysis..['listings New York$']
+    ) t
+WHERE 
+    Pricing > 0
 
 --Querying hosts and details who live in the same neighborhood as their listings
 --Using self INNER JOINS
 -------------------------------------------------------------------------------------------------------
-select distinct(a.host_id), a.HOST_NAME, a.host_neighbourhood from DataAnalysis..['listings New York$'] a inner join DataAnalysis..['listings New York$'] b
-on a.host_neighbourhood=b.neighbourhood_cleansed 
-and a.host_name=b.host_name
-order by a.host_neighbourhood, a.host_id
+SELECT DISTINCT
+    a.host_id,
+    a.HOST_NAME,
+    a.host_neighbourhood
+FROM 
+    DataAnalysis..['listings New York$'] a
+INNER JOIN 
+    DataAnalysis..['listings New York$'] b
+ON 
+    a.host_neighbourhood = b.neighbourhood_cleansed 
+    AND a.host_name = b.host_name
+ORDER BY 
+    a.host_neighbourhood,
+    a.host_id;
 
-select a.host_neighbourhood, count(distinct(a.host_id)) as Hosts_live_here from DataAnalysis..['listings New York$'] a inner join DataAnalysis..['listings New York$'] b
-on a.host_neighbourhood=b.neighbourhood_cleansed 
-and a.host_name=b.host_name
-group by a.host_neighbourhood
-order by a.host_neighbourhood
+SELECT
+    a.host_neighbourhood,
+    COUNT(DISTINCT a.host_id) AS Hosts_live_here
+FROM 
+    DataAnalysis..['listings New York$'] a
+INNER JOIN 
+    DataAnalysis..['listings New York$'] b
+ON 
+    a.host_neighbourhood = b.neighbourhood_cleansed 
+    AND a.host_name = b.host_name
+GROUP BY 
+    a.host_neighbourhood
+ORDER BY 
+    a.host_neighbourhood;
+
 
 --Further details
-select t.host_name, t.host_neighbourhood, t.name, t.neighborhood_overview, t.Neighbourhood, t.property_type, t.room_type, t.accommodates, t.price, t.review_scores_rating, t.number_of_reviews
-from
-(
-select distinct(a.host_id), a.host_name, a.host_neighbourhood, a.name, a.neighborhood_overview, a.neighbourhood_group_cleansed as Neighbourhood, a.property_type, a.room_type, a.accommodates, a.price, a.review_scores_rating , a.number_of_reviews
-from DataAnalysis..['listings New York$'] a inner join DataAnalysis..['listings New York$'] b
-on a.host_neighbourhood=b.neighbourhood_cleansed 
-and a.host_name=b.host_name
-where a.neighbourhood is not null and
-a.review_scores_rating is not null
-) t
-order by t.host_neighbourhood asc, (t.review_scores_rating*t.number_of_reviews) desc
+SELECT 
+    t.host_name, 
+    t.host_neighbourhood, 
+    t.name, 
+    t.neighborhood_overview, 
+    t.Neighbourhood, 
+    t.property_type, 
+    t.room_type, 
+    t.accommodates, 
+    t.price, 
+    t.review_scores_rating, 
+    t.number_of_reviews
+FROM 
+    (
+    SELECT DISTINCT
+        a.host_id, 
+        a.host_name, 
+        a.host_neighbourhood, 
+        a.name, 
+        a.neighborhood_overview, 
+        a.neighbourhood_group_cleansed AS Neighbourhood, 
+        a.property_type, 
+        a.room_type, 
+        a.accommodates, 
+        a.price, 
+        a.review_scores_rating, 
+        a.number_of_reviews
+    FROM 
+        DataAnalysis..['listings New York$'] a 
+    INNER JOIN 
+        DataAnalysis..['listings New York$'] b ON a.host_neighbourhood = b.neighbourhood_cleansed 
+                                                AND a.host_name = b.host_name
+    WHERE 
+        a.neighbourhood IS NOT NULL 
+        AND a.review_scores_rating IS NOT NULL
+    ) t
+ORDER BY 
+    t.host_neighbourhood ASC, 
+    (t.review_scores_rating * t.number_of_reviews) DESC;
 
 --Further details of specific Neighbourhoods
 --Using PROCEDURES
 --Using Temporary Tables
 --------------------------------------------
+DROP PROCEDURE IF EXISTS dbo.HostInSameNeighbourhood;
+GO
 
-drop procedure if exists dbo.HostInSameNeighbourhood 
+CREATE PROCEDURE dbo.HostInSameNeighbourhood
+    @neighbourhood NVARCHAR(100)	--PARAMETER LOCATION
+AS
+BEGIN
+    DROP TABLE IF EXISTS hostinfo;
+
+    CREATE TABLE hostinfo (
+        Host_Name VARCHAR(100),
+        Host_Neighbourhood VARCHAR(100),
+        Name VARCHAR(400),
+        Neighbourhood_Overview VARCHAR(5000),
+        Neighbourhood_Group VARCHAR(100),
+        Property VARCHAR(100),
+        Room VARCHAR(100),
+        Accomodates INT,
+        Price FLOAT,
+        Score FLOAT,
+        Reviews FLOAT
+    );
+END;
 
 
-go
-create procedure dbo.HostInSameNeighbourhood
-@neighbourhood nvarchar(100)				--PARAMETER LOCATION
-as
-drop table if exists hostinfo
-create table hostinfo(
-Host_Name varchar(100),
-Host_Neighbourhood varchar(100),
-Name varchar(400),
-Neighbourhood_Overview varchar(5000),
-Neighbourhood_Group varchar(100),
-Property varchar(100),
-Room varchar(100),
-Accomodates int,
-Price float,
-Score float,
-Reviews float
-)
+INSERT INTO hostinfo
+SELECT 
+    t.host_name, 
+    t.host_neighbourhood, 
+    t.name, 
+    t.neighborhood_overview, 
+    t.Neighbourhood, 
+    t.property_type, 
+    t.room_type, 
+    t.accommodates, 
+    t.price, 
+    t.review_scores_rating, 
+    t.number_of_reviews
+FROM 
+    (
+    SELECT DISTINCT
+        a.host_id, 
+        a.host_name, 
+        a.host_neighbourhood, 
+        a.name, 
+        a.neighborhood_overview, 
+        a.neighbourhood_group_cleansed AS Neighbourhood, 
+        a.property_type, 
+        a.room_type, 
+        a.accommodates, 
+        CAST(REPLACE(SUBSTRING(a.price, 2, 10), ',', '') AS FLOAT) AS price, 
+        a.review_scores_rating, 
+        a.number_of_reviews
+    FROM 
+        DataAnalysis..['listings New York$'] a 
+    INNER JOIN 
+        DataAnalysis..['listings New York$'] b ON a.host_neighbourhood = b.neighbourhood_cleansed 
+                                                AND a.host_name = b.host_name
+    WHERE 
+        a.neighbourhood IS NOT NULL 
+        AND a.review_scores_rating IS NOT NULL
+    ) t
+WHERE 
+    t.Neighbourhood = @neighbourhood	--PARAMETER LOCATION
+    AND t.price > 0
+    AND t.review_scores_rating > 0
+    AND t.number_of_reviews > 10
+ORDER BY 
+    t.host_neighbourhood ASC, 
+    (t.review_scores_rating * t.number_of_reviews) DESC;
 
-insert into hostinfo
-select t.host_name, t.host_neighbourhood, t.name, t.neighborhood_overview, t.Neighbourhood, t.property_type, t.room_type, t.accommodates, t.price, t.review_scores_rating, t.number_of_reviews
-from
-(
-select distinct(a.host_id), a.host_name, a.host_neighbourhood, a.name, a.neighborhood_overview, a.neighbourhood_group_cleansed as Neighbourhood, a.property_type, a.room_type, a.accommodates, cast(replace(substring(a.price,2,10),',','') as float) as price, a.review_scores_rating , a.number_of_reviews
-from DataAnalysis..['listings New York$'] a inner join DataAnalysis..['listings New York$'] b
-on a.host_neighbourhood=b.neighbourhood_cleansed 
-and a.host_name=b.host_name
-where a.neighbourhood is not null and
-a.review_scores_rating is not null
-) t
-where t.Neighbourhood=@neighbourhood			--PARAMETER LOCATION
-and t.price>0
-and t.review_scores_rating>0
-and t.number_of_reviews>10
-order by t.host_neighbourhood asc, (t.review_scores_rating*t.number_of_reviews) desc
+-- View the contents of the hostinfo table before executing the stored procedures
+SELECT * FROM hostinfo;
+GO
 
-select * from hostinfo
-go
+-- Define the list of neighborhoods
+DECLARE @neighborhoods TABLE (Neighborhood NVARCHAR(100));
+INSERT INTO @neighborhoods (Neighborhood) VALUES 
+    ('Bronx'),
+    ('Brooklyn'),
+    ('Manhattan'),
+    ('Queens'),
+    ('Staten Island');
 
-exec HostInSameNeighbourhood @neighbourhood='Bronx'
-exec HostInSameNeighbourhood @neighbourhood='Brooklyn'
-exec HostInSameNeighbourhood @neighbourhood='Manhattan'
-exec HostInSameNeighbourhood @neighbourhood='Queens'
-exec HostInSameNeighbourhood @neighbourhood='Staten Island'
+-- Execute the stored procedures for each neighborhood
+DECLARE @neighborhood NVARCHAR(100);
+DECLARE neighborhood_cursor CURSOR FOR
+    SELECT Neighborhood FROM @neighborhoods;
+
+OPEN neighborhood_cursor;
+FETCH NEXT FROM neighborhood_cursor INTO @neighborhood;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+    EXEC HostInSameNeighbourhood @neighbourhood = @neighborhood;
+    FETCH NEXT FROM neighborhood_cursor INTO @neighborhood;
+END
+
+CLOSE neighborhood_cursor;
+DEALLOCATE neighborhood_cursor;
+
 
 --For viewing the trend(rolling count) of listings by new hosts
 --Using PARTITION BY
 ---------------------------------------------------------------
-select
-Pricing, Dates as HostDates,
-ROW_NUMBER() over(partition by Dates order by Dates) as Counts
-from 
-(
-select *, 
-cast(replace(substring(price,2,10),',','') as float) as Pricing,
-cast(host_since as date) as Dates
-from
-DataAnalysis..['listings New York$']
-) t
-where 
-Pricing>0
-and Dates is not null
-and year(Dates)>2000
-order by Dates
+SELECT
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) AS Pricing,
+    CAST(host_since AS DATE) AS HostDates,
+    ROW_NUMBER() OVER(PARTITION BY CAST(host_since AS DATE) ORDER BY CAST(host_since AS DATE)) AS Counts
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+    AND CAST(host_since AS DATE) IS NOT NULL
+    AND YEAR(CAST(host_since AS DATE)) > 2000
+ORDER BY 
+    HostDates;
+
 
 --Quantitative details about units and prices
 --Using COUNT, MIN, MAX, AVG
 --Using TEMPORARY TABLES
 ----------------------------------------------------------
+-- Drop the table if it exists
+IF OBJECT_ID('Temp_table1', 'U') IS NOT NULL
+    DROP TABLE Temp_table1;
 
-drop table if exists Temp_table1
-create table Temp_table1(
-category varchar(200),
-Units int,
-MinPrice float,
-MaxPrice float,
-AvgPrice float
-)
+-- Create the table
+CREATE TABLE Temp_table1 (
+    category VARCHAR(200),
+    Units INT,
+    MinPrice FLOAT,
+    MaxPrice FLOAT,
+    AvgPrice FLOAT
+);
 
-insert into Temp_table1
-select property_type, 
-count(property_type),
-min(cast(replace(substring(price,2,10),',','') as float)),
-max(cast(replace(substring(price,2,10),',','') as float)),
-Round(AVG(cast(replace(substring(price,2,10),',','') as float)),2)
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
-group by property_type 
+INSERT INTO Temp_table1 (category, Units, MinPrice, MaxPrice, AvgPrice)
+SELECT 
+    property_type, 
+    COUNT(property_type),
+    MIN(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    MAX(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    ROUND(AVG(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2)
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+GROUP BY 
+    property_type;
 
-select * from Temp_table1
+-- Select all data from Temp_table1
+SELECT * FROM Temp_table1;
 
-select category, concat(MinPrice,' - ', MaxPrice) as Range,AvgPrice from Temp_table1
+-- Select category, price range, and average price from Temp_table1
+SELECT 
+    category, 
+    CONCAT(MinPrice, ' - ', MaxPrice) AS Range,
+    AvgPrice 
+FROM 
+    Temp_table1;
 
-drop table if exists Temp_table2
-create table Temp_table2(
-category varchar(200),
-Units int,
-MinPrice float,
-MaxPrice float,
-AvgPrice float
-)
+-- Drop Temp_table2 if it exists
+IF OBJECT_ID('Temp_table2', 'U') IS NOT NULL
+    DROP TABLE Temp_table2;
 
-insert into Temp_table2
-select room_type, 
-count(room_type),
-min(cast(replace(substring(price,2,10),',','') as float)),
-max(cast(replace(substring(price,2,10),',','') as float)),
-Round(AVG(cast(replace(substring(price,2,10),',','') as float)),2)
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
-group by room_type 
+-- Create Temp_table2 with the same structure as Temp_table1
+CREATE TABLE Temp_table2 (
+    category VARCHAR(200),
+    Units INT,
+    MinPrice FLOAT,
+    MaxPrice FLOAT,
+    AvgPrice FLOAT
+);
 
-select category, Units, concat(MinPrice,' - ', MaxPrice) as Range,AvgPrice from Temp_table2
+INSERT INTO Temp_table2 (category, Units, MinPrice, MaxPrice, AvgPrice)
+SELECT 
+    room_type, 
+    COUNT(room_type),
+    MIN(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    MAX(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    ROUND(AVG(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2)
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+GROUP BY 
+    room_type; 
 
-/*
-category		Units	Range		AvgPrice
-Entire home/apt	20063	10 - 10000	217.04
-Hotel room		207		50 - 1351	371.84
-Private room	16828	10 - 10000	102.95
-Shared room		576		15 - 10000	129.66
-*/
+SELECT 
+    category, 
+    Units, 
+    CONCAT(MinPrice, ' - ', MaxPrice) AS Range,
+    AvgPrice 
+FROM 
+    Temp_table2;
 
-drop table if exists Temp_table3
-create table Temp_table3(
-category varchar(200),
-Units int,
-MinPrice float,
-MaxPrice float,
-AvgPrice float
-)
+-- Drop the table if it exists
+IF OBJECT_ID('Temp_table3', 'U') IS NOT NULL
+    DROP TABLE Temp_table3;
 
-insert into Temp_table3
-select neighbourhood_group_cleansed, 
-count(neighbourhood_group_cleansed),
-min(cast(replace(substring(price,2,10),',','') as float)),
-max(cast(replace(substring(price,2,10),',','') as float)),
-Round(AVG(cast(replace(substring(price,2,10),',','') as float)),2)
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
-group by neighbourhood_group_cleansed 
+-- Create the table
+CREATE TABLE Temp_table3 (
+    category VARCHAR(200),
+    Units INT,
+    MinPrice FLOAT,
+    MaxPrice FLOAT,
+    AvgPrice FLOAT
+);
 
-select category, Units, concat(MinPrice,' - ', MaxPrice) as Range,AvgPrice from Temp_table3
+
+INSERT INTO Temp_table3 (category, Units, MinPrice, MaxPrice, AvgPrice)
+SELECT 
+    neighbourhood_group_cleansed, 
+    COUNT(neighbourhood_group_cleansed),
+    MIN(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    MAX(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    ROUND(AVG(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2)
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+GROUP BY 
+    neighbourhood_group_cleansed;
+
+SELECT 
+    category, 
+    Units, 
+    CONCAT(MinPrice, ' - ', MaxPrice) AS Range,
+    AvgPrice 
+FROM 
+    Temp_table3;
 
 /*
 category		Units	Range		AvgPrice
@@ -205,119 +351,196 @@ Queens			5178	10 - 10000	113.37
 Staten Island	339		10 - 1200	117.45
 */
 
-drop table if exists Temp_table04
-create table Temp_table04(
-category varchar(200),
-Units int,
-MinPrice float,
-MaxPrice float,
-AvgPrice float
-)
+-- Drop the table if it exists
+IF OBJECT_ID('Temp_table04', 'U') IS NOT NULL
+    DROP TABLE Temp_table04;
 
-insert into Temp_table04
-select neighbourhood_cleansed, 
-count(neighbourhood_cleansed),
-min(cast(replace(substring(price,2,10),',','') as float)),
-max(cast(replace(substring(price,2,10),',','') as float)),
-Round(AVG(cast(replace(substring(price,2,10),',','') as float)),2)
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
-group by neighbourhood_cleansed 
+-- Create the table
+CREATE TABLE Temp_table04 (
+    category VARCHAR(200),
+    Units INT,
+    MinPrice FLOAT,
+    MaxPrice FLOAT,
+    AvgPrice FLOAT
+);
 
-select category, Units, concat(MinPrice,' - ', MaxPrice) as Range,AvgPrice from Temp_table04
-where category='Allerton'
---order by category
-
-
+INSERT INTO Temp_table04 (category, Units, MinPrice, MaxPrice, AvgPrice)
+SELECT 
+    neighbourhood_cleansed, 
+    COUNT(neighbourhood_cleansed),
+    MIN(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    MAX(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    ROUND(AVG(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2)
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+    AND review_scores_rating > 0
+GROUP BY 
+    neighbourhood_cleansed;
+ 
+SELECT 
+    category, 
+    Units, 
+    CONCAT(MinPrice, ' - ', MaxPrice) AS Range,
+    AvgPrice 
+FROM 
+    Temp_table04
+WHERE 
+    category = 'Allerton';
 
 --Querying ratings info
 -----------------------
 
-drop table if exists Review_table1
-create table Review_table1(
-Name varchar(300),
-Neighbourhood_group varchar(100),
-Neighbourhood varchar(200),
-Property_type varchar(100),
-Room_type  varchar(100),
-Price float, 
-Reviews int,
-Score float,
-Score_Accuracy float,
-Cleanliness float,
-Checkin float,
-Communication float,
-Location float,
-Value float
+-- Drop the table if it exists
+IF OBJECT_ID('Review_table1', 'U') IS NOT NULL
+    DROP TABLE Review_table1;
+
+-- Create the table
+CREATE TABLE Review_table1 (
+    Name VARCHAR(300),
+    Neighbourhood_group VARCHAR(100),
+    Neighbourhood VARCHAR(200),
+    Property_type VARCHAR(100),
+    Room_type VARCHAR(100),
+    Price FLOAT, 
+    Reviews INT,
+    Score FLOAT,
+    Score_Accuracy FLOAT,
+    Cleanliness FLOAT,
+    Checkin FLOAT,
+    Communication FLOAT,
+    Location FLOAT,
+    Value FLOAT
+);
+
+INSERT INTO Review_table1 (
+    Name,
+    Neighbourhood_group,
+    Neighbourhood,
+    Property_type,
+    Room_type,
+    Price,
+    Reviews,
+    Score,
+    Score_Accuracy,
+    Cleanliness,
+    Checkin,
+    Communication,
+    Location,
+    Value
 )
+SELECT 
+    name,
+    neighbourhood_group_cleansed,
+    neighbourhood_cleansed,
+    property_type,
+    room_type,
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT),
+    number_of_reviews,
+    review_scores_rating,
+    review_scores_accuracy,
+    review_scores_cleanliness,
+    review_scores_checkin,
+    review_scores_communication,
+    review_scores_location,
+    review_scores_value
+FROM 
+    DataAnalysis..['listings New York$'];
 
-insert into Review_table1
-select 
-name, 
-neighbourhood_group_cleansed, 
-neighbourhood_cleansed, 
-property_type, 
-room_type, 
-cast(replace(substring(price,2,10),',','') as float),
-number_of_reviews,
-review_scores_rating,
-review_scores_accuracy,
-review_scores_cleanliness,
-review_scores_checkin,
-review_scores_communication,
-review_scores_location,
-review_scores_value
-from DataAnalysis..['listings New York$']
+-- Retrieve data from Review_table1 where Score is not null and Price is greater than 0
+SELECT *
+FROM Review_table1
+WHERE Score IS NOT NULL
+AND Price > 0;
+-- AND Reviews > 0; -- Uncomment this line if you want to filter by Reviews greater than 0
 
---Cleaning data
-select * from Review_table1
-where Score is not null
-and Price>0
---and Reviews>0
+-- Categorize data by neighborhood and calculate the average score for each neighborhood
+SELECT
+    Neighbourhood,
+    ROUND(AVG(Score), 2) AS AvgScore
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+GROUP BY
+    Neighbourhood
+ORDER BY
+    Neighbourhood;
 
---Categorizing
-select Neighbourhood, round(avg(Score),2) as AvgScore from Review_table1
-where Score is not null
-and Price>0
-group by Neighbourhood
-order by Neighbourhood
 
-select Property_type, round(avg(Score),2) as AvgScore from Review_table1
-where Score is not null
-and Price>0
-group by Property_type
-order by Property_type
+-- Calculate the average score for each property type
+SELECT
+    Property_type,
+    ROUND(AVG(Score), 2) AS AvgScore
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+GROUP BY
+    Property_type
+ORDER BY
+    Property_type;
 
-select Room_type, round(avg(Score),2) as AvgScore from Review_table1
-where Score is not null
-and Price>0
-group by Room_type
-order by Room_type
+-- Calculate the average score for each room type
+SELECT
+    Room_type,
+    ROUND(AVG(Score), 2) AS AvgScore
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+GROUP BY
+    Room_type
+ORDER BY
+    Room_type;
 
-select Room_type, round((sum(Score*Reviews)/sum(Reviews)),2) as AvgModScore from Review_table1
-where Score is not null
-and Price>0
-group by Room_type
-order by Room_type
+-- Calculate the modified average score for each room type
+SELECT
+    Room_type,
+    ROUND((SUM(Score * Reviews) / SUM(Reviews)), 2) AS AvgModScore
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+GROUP BY
+    Room_type
+ORDER BY
+    Room_type;
 
---Property type wise
---Checking range and average of ratings
-select Property_type, concat(min(Score),' - ', max(Score)) as Range_of_ratings, AVG(Score) as Aerage_ratings from Review_table1 
-where Score is not null
-and Price>0
-and Reviews>10 --for reliable scores
---and Reviews>0
-group by Property_type
 
---Room type wise
---Checking range and average of ratings
-select Room_type, concat(min(Score),' - ', max(Score)) as Range_of_ratings, AVG(Score) as Aerage_ratings from Review_table1 
-where Score is not null
-and Price>0
-and Reviews>10 --for reliable scores
---and Reviews>0
-group by Room_type
+-- Property type wise: Checking range and average of ratings
+SELECT
+    Property_type,
+    CONCAT(MIN(Score), ' - ', MAX(Score)) AS Range_of_ratings,
+    AVG(Score) AS Average_ratings
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+    AND Reviews > 10 -- For reliable scores
+GROUP BY
+    Property_type;
+
+-- Room type wise: Checking range and average of ratings
+SELECT
+    Room_type,
+    CONCAT(MIN(Score), ' - ', MAX(Score)) AS Range_of_ratings,
+    AVG(Score) AS Average_ratings
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+    AND Reviews > 10 -- For reliable scores
+GROUP BY
+    Room_type;
+
 /*
 Room_type			Range_of_ratings		Aerage_ratings
 Hotel room			3.37 - 5				4.43
@@ -326,34 +549,52 @@ Private room		2.36 - 5				4.72813807144178
 Entire home/apt		3.5 - 5					4.76333653978286
 */
 
+-- Neighbourhood wise: Checking range and average of ratings
+SELECT
+    Neighbourhood,
+    CONCAT(MIN(Score), ' - ', MAX(Score)) AS Range_of_ratings,
+    AVG(Score) AS Average_ratings
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+    AND Reviews > 10 -- For reliable scores
+GROUP BY
+    Neighbourhood;
+
+-- Checking minimum score for each neighbourhood
+SELECT TOP 1
+    Neighbourhood,
+    MIN(Score) AS Minimum
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+    AND Reviews > 10 -- For reliable scores
+GROUP BY
+    Neighbourhood
+ORDER BY
+    Minimum;
+
+
+
 --Neighbourhood wise
---Checking range and average of ratings
-select Neighbourhood, concat(min(Score),' - ', max(Score)) as Range_of_ratings, AVG(Score) as Aerage_ratings from Review_table1 
-where Score is not null
-and Price>0
-and Reviews>10 --for reliable scores
---and Reviews>0
-group by Neighbourhood
+-- Checking range and average of ratings for each neighborhood group
+SELECT
+    Neighbourhood_group,
+    CONCAT(MIN(Score), ' - ', MAX(Score)) AS Range_of_ratings,
+    AVG(Score) AS Average_ratings
+FROM
+    Review_table1
+WHERE
+    Score IS NOT NULL
+    AND Price > 0
+    AND Reviews > 10 -- For reliable scores
+GROUP BY
+    Neighbourhood_group;
 
-
---Checking min
-select top 1 Neighbourhood, min(Score) as Minimum from Review_table1 
-where Score is not null
-and Price>0
-and Reviews>10 --for reliable scores
---and Reviews>0
-group by Neighbourhood
-order by Minimum
-
-
---Neighbourhood wise
---Checking range and average of ratings
-select Neighbourhood_group, concat(min(Score),' - ', max(Score)) as Range_of_ratings, AVG(Score) as Aerage_ratings from Review_table1 
-where Score is not null
-and Price>0
-and Reviews>10 --for reliable scores
---and Reviews>0
-group by Neighbourhood_group
 /*
 Neighbourhood	Range_of_ratings	Aerage_ratings
 Brooklyn		3.87 - 5			4.76833826794965
@@ -384,84 +625,115 @@ r=(n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))
 */
 -------------------------------------------------------------------
 
-select n, Sx,Sy,Sxy,Sx2,Sy2,(n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from
-(
-select 
-count(*) as n, 
-sum(price) as Sx,
-sum(Score) as Sy,
-sum(price*Score) as Sxy,
-sum(power(price,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table1
-where Score is not null
-and Price>0
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    n, 
+    Sx, 
+    Sy, 
+    Sxy, 
+    Sx2, 
+    Sy2, 
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        COUNT(*) AS n, 
+        SUM(price) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(price * Score) AS Sxy,
+        SUM(POWER(price, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table1
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0;
+--to prevent divide by zero error
 ---------------------------------------------------------------------------------------
 --Overall there was a WEAK POSITIVE CORRELATION between MORE EXPENSIVE & HIGH REVIEWS |
 ---------------------------------------------------------------------------------------
 
 --Displaying correlation Neighbourhood wise
-select Neighbourhood, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Neighbourhood,
-count(*) as n, 
-sum(price) as Sx,
-sum(Score) as Sy,
-sum(price*Score) as Sxy,
-sum(power(price,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table1
-where Score is not null
-and Price>0
-group by Neighbourhood
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Neighbourhood,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Neighbourhood,
+        COUNT(*) AS n, 
+        SUM(price) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(price * Score) AS Sxy,
+        SUM(POWER(price, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table1
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+    GROUP BY 
+        Neighbourhood
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0;
+
 
 --------------------------------------------------------------------------------------------------
 --There was a WEAK POSITIVE CORRELATION between MORE EXPENSIVE & HIGH REVIEWS for Neighbourhoods |
 --------------------------------------------------------------------------------------------------
 
 --Displaying correlation Property type wise
-select Property_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Property_type,
-count(*) as n, 
-sum(price) as Sx,
-sum(Score) as Sy,
-sum(price*Score) as Sxy,
-sum(power(price,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table1
-where Score is not null
-and Price>0
-and Score>0
-group by Property_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Property_type,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Property_type,
+        COUNT(*) AS n, 
+        SUM(price) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(price * Score) AS Sxy,
+        SUM(POWER(price, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table1
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+        AND Score > 0
+    GROUP BY 
+        Property_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0;
 
 --Displaying correlation Room type type wise
-select Room_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Room_type,
-count(*) as n, 
-sum(price) as Sx,
-sum(Score) as Sy,
-sum(price*Score) as Sxy,
-sum(power(price,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table1
-where Score is not null
-and Price>0
-and Score>0
-and Reviews>50 --to see more reliable reviews
-group by Room_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Room_type,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Room_type,
+        COUNT(*) AS n, 
+        SUM(price) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(price * Score) AS Sxy,
+        SUM(POWER(price, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table1
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+        AND Score > 0
+        AND Reviews > 50 -- to see more reliable reviews
+    GROUP BY 
+        Room_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- to prevent divide by zero error
+
 
 -------------------------------------------------------------------------------------------------------------------------------
 --Overall there was a WEAK POSITIVE CORRELATION between MORE EXPENSIVE & HIGH REVIEWS for Hotels, Shared rooms & Entire Homes |
@@ -469,24 +741,33 @@ where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zer
 -------------------------------------------------------------------------------------------------------------------------------
 
 --Displaying DETAILED correlation Room type type wise in Neighbourhoods
-select Neighbourhood, Room_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R 
-from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Neighbourhood,Room_type,
-count(*) as n, 
-sum(price) as Sx,
-sum(Score) as Sy,
-sum(price*Score) as Sxy,
-sum(power(price,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table1
-where Score is not null
-and Price>0
-group by Neighbourhood, Room_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
-order by Neighbourhood,Room_type
+SELECT 
+    Neighbourhood,
+    Room_type,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R 
+FROM (
+    SELECT 
+        Neighbourhood,
+        Room_type,
+        COUNT(*) AS n, 
+        SUM(price) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(price * Score) AS Sxy,
+        SUM(POWER(price, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table1
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+    GROUP BY 
+        Neighbourhood, Room_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0 -- to prevent divide by zero error
+ORDER BY 
+    Neighbourhood, Room_type;
+
 /*
 Neighbourhood	Room_type				Pearson's R
 Bronx			Entire home/apt		 0.0730143761665861
@@ -516,40 +797,59 @@ Staten Island	Shared room			 0.999999999999992
 --Extracting bathroom and bedroom count
 --Using PATINDEX
 
-select 
-cast(
-isnull(
-replace(bathrooms_text,
-(substring(bathrooms_text,PATINDEX('%[a-z]%',bathrooms_text),len(bathrooms_text))),
-'')
-,0) as float) as Bathrooms 
-from DataAnalysis..['listings New York$']
-order by id
+-- Extracting and converting the number of bathrooms
+SELECT 
+    CAST(
+        ISNULL(
+            REPLACE(
+                bathrooms_text,
+                SUBSTRING(bathrooms_text, PATINDEX('%[a-z]%', bathrooms_text), LEN(bathrooms_text)),
+                ''
+            ),
+            0
+        ) AS FLOAT
+    ) AS Bathrooms 
+FROM 
+    DataAnalysis..['listings New York$']
+ORDER BY 
+    id;
 
-select cast(isnull(bedrooms,0) as float) as Bedrooms from DataAnalysis..['listings New York$']
-order by id
+-- Extracting and converting the number of bedrooms
+SELECT 
+    CAST(
+        ISNULL(bedrooms, 0) AS FLOAT
+    ) AS Bedrooms 
+FROM 
+    DataAnalysis..['listings New York$']
+ORDER BY 
+    id;
+
 
 --Querying bedrooms & bathrooms info
 ------------------------------------
 
-drop table if exists Review_table2
-create table Review_table2(
-Name varchar(300),
-Neighbourhood varchar(100),
-Property_type varchar(100),
-Room_type  varchar(100),
-Price float, 
-Reviews int,
-Score float,
-Score_Accuracy float,
-Cleanliness float,
-Checkin float,
-Communication float,
-Location float,
-Value float,
-Bedrooms float,
-Bathrooms float
-)
+-- Drop the table if it exists
+DROP TABLE IF EXISTS Review_table2;
+
+-- Create the new table
+CREATE TABLE Review_table2 (
+    Name VARCHAR(300),
+    Neighbourhood VARCHAR(100),
+    Property_type VARCHAR(100),
+    Room_type VARCHAR(100),
+    Price FLOAT, 
+    Reviews INT,
+    Score FLOAT,
+    Score_Accuracy FLOAT,
+    Cleanliness FLOAT,
+    Checkin FLOAT,
+    Communication FLOAT,
+    Location FLOAT,
+    Value FLOAT,
+    Bedrooms FLOAT,
+    Bathrooms FLOAT
+);
+
 
 insert into Review_table2
 select name, 
@@ -574,57 +874,87 @@ replace(bathrooms_text,
 from DataAnalysis..['listings New York$']
 
 --Validating the data
-select * from Review_table2
+-- Retrieve all columns from Review_table2
+SELECT * FROM Review_table2;
 
-select name,Bedrooms,Bathrooms from Review_table2
-where name='BEST BET IN HARLEM' or
-name ='Lovely Room 1, Garden, Best Area, Legal rental' or
-name ='Midtown Pied-a-terre'
+-- Retrieve specific columns from Review_table2 for certain listings
+SELECT 
+    name,
+    Bedrooms,
+    Bathrooms
+FROM 
+    Review_table2
+WHERE 
+    name IN ('BEST BET IN HARLEM', 'Lovely Room 1, Garden, Best Area, Legal rental', 'Midtown Pied-a-terre');
 
-select name, bedrooms,bathrooms_text from DataAnalysis..['listings New York$']
-where name='BEST BET IN HARLEM' or
-name ='Lovely Room 1, Garden, Best Area, Legal rental' or
-name ='Midtown Pied-a-terre'
+-- Retrieve name, bedrooms, and bathrooms_text from DataAnalysis..['listings New York$'] for certain listings
+SELECT 
+    name,
+    bedrooms,
+    bathrooms_text
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    name IN ('BEST BET IN HARLEM', 'Lovely Room 1, Garden, Best Area, Legal rental', 'Midtown Pied-a-terre');
+
 
 --Checking Correlation of bedrooms and ratings using Pearson's formula
 ----------------------------------------------------------------------
 
-select n, Sx,Sy,Sxy,Sx2,Sy2,(n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from
-(
-select 
-count(*) as n, 
-sum(Bedrooms) as Sx,
-sum(Score) as Sy,
-sum(Bedrooms*Score) as Sxy,
-sum(power(Bedrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    n,
+    Sx,
+    Sy,
+    Sxy,
+    Sx2,
+    Sy2,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        COUNT(*) AS n, 
+        SUM(Bedrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bedrooms * Score) AS Sxy,
+        SUM(POWER(Bedrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- To prevent divide by zero error
+
 
 --------------------------------------------------------------------------------------
 --Overall there was a WEAK POSITIVE CORRELATION between MORE BEDROOMS & HIGH REVIEWS |
 --------------------------------------------------------------------------------------
 
 --Displaying correlation Neighbourhood wise
-select Neighbourhood, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Neighbourhood,
-count(*) as n, 
-sum(Bedrooms) as Sx,
-sum(Score) as Sy,
-sum(Bedrooms*Score) as Sxy,
-sum(power(Bedrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-group by Neighbourhood
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Neighbourhood,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Neighbourhood,
+        COUNT(*) AS n, 
+        SUM(Bedrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bedrooms * Score) AS Sxy,
+        SUM(POWER(Bedrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+    GROUP BY 
+        Neighbourhood
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- To prevent divide by zero error
+
 
 ----------------------------------------------------------------------------------------------------------------
 --There was a WEAK POSITIVE CORRELATION between MORE BEDROOMS & HIGH REVIEWS for Brooklyn, Manhattan, & Queens |
@@ -632,42 +962,56 @@ where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zer
 ----------------------------------------------------------------------------------------------------------------
 
 --Displaying correlation Property type wise
-select Property_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Property_type,
-count(*) as n, 
-sum(Bedrooms) as Sx,
-sum(Score) as Sy,
-sum(Bedrooms*Score) as Sxy,
-sum(power(Bedrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-and Score>0
-group by Property_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Property_type,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Property_type,
+        COUNT(*) AS n, 
+        SUM(Bedrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bedrooms * Score) AS Sxy,
+        SUM(POWER(Bedrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+        AND Score > 0
+    GROUP BY 
+        Property_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- To prevent divide by zero error
+
 
 --Displaying correlation Room type type wise
-select Room_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Room_type,
-count(*) as n, 
-sum(Bedrooms) as Sx,
-sum(Score) as Sy,
-sum(Bedrooms*Score) as Sxy,
-sum(power(Bedrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-and Score>0
-group by Room_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Room_type,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Room_type,
+        COUNT(*) AS n, 
+        SUM(Bedrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bedrooms * Score) AS Sxy,
+        SUM(POWER(Bedrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+        AND Score > 0
+    GROUP BY 
+        Room_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- To prevent divide by zero error
+
 ----------------------------------------------------------------------------------------------------------------
 --There was a WEAK POSITIVE CORRELATION between MORE BEDROOMS & HIGH REVIEWS for Private Rooms				   |
 --There was a WEAK NEGATIVE CORRELATION between MORE BEDROOMS & HIGH REVIEWS for Hotels & Entire Homes		   |
@@ -675,23 +1019,33 @@ where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zer
 
 
 ----Displaying correlation Room type type wise in Neighbourhoods for better insights
-select Neighbourhood, Room_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Neighbourhood,Room_type,
-count(*) as n, 
-sum(Bedrooms) as Sx,
-sum(Score) as Sy,
-sum(Bedrooms*Score) as Sxy,
-sum(power(Bedrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-group by Neighbourhood, Room_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
-order by Neighbourhood,Room_type
+SELECT 
+    Neighbourhood,
+    Room_type,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Neighbourhood,
+        Room_type,
+        COUNT(*) AS n, 
+        SUM(Bedrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bedrooms * Score) AS Sxy,
+        SUM(POWER(Bedrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+    GROUP BY 
+        Neighbourhood, Room_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0 -- To prevent divide by zero error
+ORDER BY 
+    Neighbourhood, Room_type;
+
 /*
 Neighbourhood	Room_type				Pearson's R
 Bronx			Entire home/apt		-0.0401065219845552
@@ -710,42 +1064,60 @@ Staten Island	Private room		-0.0163007555423255
 
 --Checking Correlation of bathrooms and ratings using Pearson's formula
 -----------------------------------------------------------------------
-select n, Sx,Sy,Sxy,Sx2,Sy2,(n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from
-(
-select 
-count(*) as n, 
-sum(Bathrooms) as Sx,
-sum(Score) as Sy,
-sum(Bathrooms*Score) as Sxy,
-sum(power(Bathrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    n,
+    Sx,
+    Sy,
+    Sxy,
+    Sx2,
+    Sy2,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        COUNT(*) AS n, 
+        SUM(Bathrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bathrooms * Score) AS Sxy,
+        SUM(POWER(Bathrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- To prevent divide by zero error
+
 
 --------------------------------------------------------------------------------------------
 --Overall there was a VERY WEAK POSITIVE CORRELATION between MORE BATHROOMS & HIGH REVIEWS |
 --------------------------------------------------------------------------------------------
 
 --Displaying correlation Neighbourhood wise
-select Neighbourhood, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Neighbourhood,
-count(*) as n, 
-sum(Bathrooms) as Sx,
-sum(Score) as Sy,
-sum(Bathrooms*Score) as Sxy,
-sum(power(Bathrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-group by Neighbourhood
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Neighbourhood,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Neighbourhood,
+        COUNT(*) AS n, 
+        SUM(Bathrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bathrooms * Score) AS Sxy,
+        SUM(POWER(Bathrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+    GROUP BY 
+        Neighbourhood
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- To prevent divide by zero error
+
 
 --------------------------------------------------------------------------------------------------------------
 --There was a WEAK POSITIVE CORRELATION between MORE BATHROOMS & HIGH REVIEWS for Bronx, Manhattan, & Queens |
@@ -753,46 +1125,62 @@ where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zer
 --------------------------------------------------------------------------------------------------------------
 
 --Displaying correlation Room type type wise
-select Room_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Room_type,
-count(*) as n, 
-sum(Bathrooms) as Sx,
-sum(Score) as Sy,
-sum(Bathrooms*Score) as Sxy,
-sum(power(Bathrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-and Score>0
-group by Room_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
+SELECT 
+    Room_type,
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R
+FROM (
+    SELECT 
+        Room_type,
+        COUNT(*) AS n, 
+        SUM(Bathrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bathrooms * Score) AS Sxy,
+        SUM(POWER(Bathrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+        AND Score > 0
+    GROUP BY 
+        Room_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0; -- To prevent divide by zero error
+
 ----------------------------------------------------------------------------------------------------------
 --There was a WEAK POSITIVE CORRELATION between MORE BATHROOMS & HIGH REVIEWS for Hotels & Entire Homes  |
 --There was a WEAK NEGATIVE CORRELATION between MORE BATHROOMS & HIGH REVIEWS for Shared & Private Rooms |
 ----------------------------------------------------------------------------------------------------------
 
 ----Displaying correlation Room type type wise in Neighbourhoods for better insights
-select Neighbourhood, Room_type, (n*Sxy-Sx*Sy)/sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2))) as R from --n, Sx,Sy,Sxy,Sx2,Sy2,
-(
-select 
-Neighbourhood,Room_type,
-count(*) as n, 
-sum(Bedrooms) as Sx,
-sum(Score) as Sy,
-sum(Bedrooms*Score) as Sxy,
-sum(power(Bedrooms,2)) as Sx2,
-sum(power(Score,2)) as Sy2
-from Review_table2
-where Score is not null
-and Price>0
-group by Neighbourhood, Room_type
-) as t
-where sqrt((n*Sx2-power(Sx,2))*(n*Sy2-power(Sy,2)))>0 --to prevent divide by zero error
-order by Neighbourhood,Room_type
+SELECT 
+    Neighbourhood, 
+    Room_type, 
+    (n * Sxy - Sx * Sy) / SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) AS R 
+FROM (
+    SELECT 
+        Neighbourhood,
+        Room_type,
+        COUNT(*) AS n, 
+        SUM(Bedrooms) AS Sx,
+        SUM(Score) AS Sy,
+        SUM(Bedrooms * Score) AS Sxy,
+        SUM(POWER(Bedrooms, 2)) AS Sx2,
+        SUM(POWER(Score, 2)) AS Sy2
+    FROM 
+        Review_table2
+    WHERE 
+        Score IS NOT NULL
+        AND Price > 0
+    GROUP BY 
+        Neighbourhood, Room_type
+) AS t
+WHERE 
+    SQRT((n * Sx2 - POWER(Sx, 2)) * (n * Sy2 - POWER(Sy, 2))) > 0 -- To prevent divide by zero error
+ORDER 
+
 
 /*
 Neighbourhood		Room_type			Pearson's R
@@ -813,25 +1201,34 @@ Staten Island	Private room		-0.0163007555423255
 --Looking at super hosts and non super hosts
 --Using CASE STATEMENTS
 --------------------------------------------
-select * from Review_table2
-
-select Superhost, round(AVG(cast(replace(substring(t.price,2,10),',','') as float)),2) as AvgPrice,
-concat(min(rt2.price),' - ',max(rt2.price) ) as Range, 
-avg(Score) as Score, avg(Score_Accuracy) as ScoreAccuracy,avg(Cleanliness)as Cleanliness,avg(Checkin) as Checkin,
-avg(Communication) as Communication, avg(Location) as Location, avg(Value) as Value
-from(
-select * ,
-case
-	when host_is_superhost='f' then 0
-	else 1
-end as Superhost
-from DataAnalysis..['listings New York$']
-) as t
-inner join Review_table2 as rt2 on t.name=rt2.Name
-where rt2.Price>0 
-and Reviews>10
-and Score is not null
-group by Superhost
+SELECT 
+    Superhost, 
+    ROUND(AVG(CAST(REPLACE(SUBSTRING(rt2.price, 2, 10), ',', '') AS FLOAT)), 2) AS AvgPrice,
+    CONCAT(MIN(rt2.price), ' - ', MAX(rt2.price)) AS PriceRange, 
+    AVG(Score) AS AvgScore, 
+    AVG(Score_Accuracy) AS AvgScoreAccuracy,
+    AVG(Cleanliness) AS AvgCleanliness,
+    AVG(Checkin) AS AvgCheckin,
+    AVG(Communication) AS AvgCommunication,
+    AVG(Location) AS AvgLocation,
+    AVG(Value) AS AvgValue
+FROM (
+    SELECT 
+        *,
+        CASE
+            WHEN host_is_superhost = 'f' THEN 0
+            ELSE 1
+        END AS Superhost
+    FROM 
+        DataAnalysis..['listings New York$']
+) AS t
+INNER JOIN Review_table2 AS rt2 ON t.name = rt2.Name
+WHERE 
+    rt2.Price > 0 
+    AND Reviews > 10
+    AND Score IS NOT NULL
+GROUP BY 
+    Superhost;
 
 /*
 Superhost	AvgPrice	Range		Score				ScoreAccuracy		Cleanliness			Checkin				Communication		Location			Value
@@ -845,12 +1242,19 @@ Superhost	AvgPrice	Range		Score				ScoreAccuracy		Cleanliness			Checkin				Commu
 
 --Room type wise
 --Checking range and average of ratings based on Cleanliness
-select Room_type, concat(min(Cleanliness),' - ', max(Cleanliness)) as Range_of_ratings, AVG(Cleanliness) as Aerage_ratings from Review_table1 
-where Score is not null
-and Price>0
-and Reviews>10 --for reliable scores
---and Reviews>0
-group by Room_type
+SELECT 
+    Room_type, 
+    CONCAT(MIN(Cleanliness), ' - ', MAX(Cleanliness)) AS Range_of_ratings, 
+    AVG(Cleanliness) AS Average_ratings 
+FROM 
+    Review_table1 
+WHERE 
+    Score IS NOT NULL
+    AND Price > 0
+    AND Reviews > 10 --for reliable scores
+GROUP BY 
+    Room_type;
+
 /*
 Room_type		Range_of_ratings	Aerage_ratings
 Hotel room		3.62 - 5			4.59337662337662
@@ -861,12 +1265,19 @@ Entire home/apt	2.95 - 5			4.7247643259585
 
 --Neighbourhood wise
 --Checking range and average of ratings
-select Neighbourhood, concat(min(Cleanliness),' - ', max(Cleanliness)) as Range_of_ratings, AVG(Cleanliness) as Aerage_ratings from Review_table1 
-where Score is not null
-and Price>0
-and Reviews>10 --for reliable scores
---and Reviews>0
-group by Neighbourhood
+SELECT 
+    Neighbourhood, 
+    CONCAT(MIN(Cleanliness), ' - ', MAX(Cleanliness)) AS Range_of_ratings, 
+    AVG(Cleanliness) AS Average_ratings 
+FROM 
+    Review_table1 
+WHERE 
+    Score IS NOT NULL
+    AND Price > 0
+    AND Reviews > 10 --for reliable scores
+GROUP BY 
+    Neighbourhood;
+
 
 /*
 Neighbourhood	Range_of_ratings	Aerage_ratings
@@ -879,22 +1290,32 @@ Queens			3.41 - 5			4.73763975155279
 
 
 --Looking at Response rate & Acceptance rate
-select Superhost, avg(host_response_rate_num) as Avg_Response_rate, avg(host_acceptance_rate_num) as Avg_Acc_rate
-from
+SELECT 
+    Superhost,
+    AVG(CAST(host_response_rate_num AS FLOAT)) AS Avg_Response_rate,
+    AVG(CAST(host_acceptance_rate_num AS FLOAT)) AS Avg_Acc_rate
+FROM
 (
-select * ,
-case
-	when host_is_superhost='f' then 0
-	else 1
-end as Superhost,
-isnull(host_response_rate,0) as host_response_rate_num,ISNULL( host_acceptance_rate,0) as host_acceptance_rate_num
-from DataAnalysis..['listings New York$']
-) as t
-inner join Review_table2 as rt2 on t.name=rt2.Name
-where rt2.Price>0 
-and Reviews>10
-and Score is not null
-group by Superhost
+    SELECT 
+        *,
+        CASE
+            WHEN host_is_superhost = 'f' THEN 0
+            ELSE 1
+        END AS Superhost,
+        ISNULL(host_response_rate, 0) AS host_response_rate_num,
+        ISNULL(host_acceptance_rate, 0) AS host_acceptance_rate_num
+    FROM 
+        DataAnalysis..['listings New York$']
+) AS t
+INNER JOIN 
+    Review_table2 AS rt2 ON t.name = rt2.Name
+WHERE 
+    rt2.Price > 0 
+    AND Reviews > 10
+    AND Score IS NOT NULL
+GROUP BY 
+    Superhost;
+
 
 /*
 Superhost	Avg_Response_rate	Avg_Acc_rate
@@ -908,26 +1329,35 @@ Superhost	Avg_Response_rate	Avg_Acc_rate
 -----------------------------------------------------------------------------------------------------------------------------
 
 --Looking at instant bookablity
-select Superhost, sum(ib) as Instant_Bookable, count(ib) as Total,
-concat(cast((cast(sum(ib) as float)*100/cast(COUNT(ib) as float)) as decimal(10,2)),'%') as AvgB
-from
+SELECT 
+    Superhost,
+    SUM(ib) AS Instant_Bookable,
+    COUNT(ib) AS Total,
+    CONCAT(CAST((CAST(SUM(ib) AS FLOAT) * 100 / CAST(COUNT(ib) AS FLOAT)) AS DECIMAL(10, 2)), '%') AS AvgB
+FROM
 (
-select * ,
-case
-	when host_is_superhost='f' then 0
-	else 1
-end as Superhost,
-case
-	when instant_bookable='f' then 0
-	else 1
-end as ib
-from DataAnalysis..['listings New York$']
-) as t
-inner join Review_table2 as rt2 on t.name=rt2.Name
-where rt2.Price>0 
-and Reviews>10
-and Score is not null
-group by Superhost
+    SELECT 
+        *,
+        CASE
+            WHEN host_is_superhost = 'f' THEN 0
+            ELSE 1
+        END AS Superhost,
+        CASE
+            WHEN instant_bookable = 'f' THEN 0
+            ELSE 1
+        END AS ib
+    FROM 
+        DataAnalysis..['listings New York$']
+) AS t
+INNER JOIN 
+    Review_table2 AS rt2 ON t.name = rt2.Name
+WHERE 
+    rt2.Price > 0 
+    AND Reviews > 10
+    AND Score IS NOT NULL
+GROUP BY 
+    Superhost;
+
 
 /*
 Superhost	Instant_Bookable	Total	AvgB
@@ -939,24 +1369,33 @@ Superhost	Instant_Bookable	Total	AvgB
 --------------------------------------------------
 
 --Location of Superhosts
-select neighbourhood_group_cleansed as Neighbourhood, count(*) as Totalhosts, sum(Superhost) Superhosts,
-concat(cast((cast(sum(Superhost) as float)*100/cast(count(*) as float)) as decimal(10,2)),'%') as PercentSuperhosts
-
-from 
+SELECT 
+    neighbourhood_group_cleansed AS Neighbourhood,
+    COUNT(*) AS Totalhosts,
+    SUM(Superhost) AS Superhosts,
+    CONCAT(CAST((CAST(SUM(Superhost) AS FLOAT) * 100 / CAST(COUNT(*) AS FLOAT)) AS DECIMAL(10, 2)), '%') AS PercentSuperhosts
+FROM 
 (
-select * ,
-case
-	when host_is_superhost='f' then 0
-	else 1
-end as Superhost
-from DataAnalysis..['listings New York$']
-) as t
-inner join Review_table2 as rt2 on t.name=rt2.Name
-where rt2.Price>0 
-and Reviews>10
-and Score is not null
-group by neighbourhood_group_cleansed
-order by neighbourhood_group_cleansed
+    SELECT 
+        *,
+        CASE
+            WHEN host_is_superhost = 'f' THEN 0
+            ELSE 1
+        END AS Superhost
+    FROM 
+        DataAnalysis..['listings New York$']
+) AS t
+INNER JOIN 
+    Review_table2 AS rt2 ON t.name = rt2.Name
+WHERE 
+    rt2.Price > 0 
+    AND Reviews > 10
+    AND Score IS NOT NULL
+GROUP BY 
+    neighbourhood_group_cleansed
+ORDER BY 
+    neighbourhood_group_cleansed;
+
 /*
 Neighbourhood	Totalhosts	Superhosts	PercentSuperhosts
 Bronx			518			225			43.44%
@@ -967,23 +1406,33 @@ Staten Island	183			101			55.19%
 */
 
 --Room types owned by super hosts
-select t.room_type as RoomType, count(*) as Totalhosts, sum(Superhost) Superhosts,
-concat(cast((cast(sum(Superhost) as float)*100/cast(count(*) as float)) as decimal(10,2)),'%') as PercentSuperhosts
-from 
+SELECT 
+    t.room_type AS RoomType, 
+    COUNT(*) AS Totalhosts, 
+    SUM(Superhost) AS Superhosts,
+    CONCAT(CAST((CAST(SUM(Superhost) AS FLOAT) * 100 / CAST(COUNT(*) AS FLOAT)) AS DECIMAL(10, 2)), '%') AS PercentSuperhosts
+FROM 
 (
-select * ,
-case
-	when host_is_superhost='f' then 0
-	else 1
-end as Superhost
-from DataAnalysis..['listings New York$']
-) as t
-inner join Review_table2 as rt2 on t.name=rt2.Name
-where rt2.Price>0 
-and Reviews>10
-and Score is not null
-group by t.room_type
-order by t.room_type
+    SELECT 
+        *,
+        CASE
+            WHEN host_is_superhost = 'f' THEN 0
+            ELSE 1
+        END AS Superhost
+    FROM 
+        DataAnalysis..['listings New York$']
+) AS t
+INNER JOIN 
+    Review_table2 AS rt2 ON t.name = rt2.Name
+WHERE 
+    rt2.Price > 0 
+    AND Reviews > 10
+    AND Score IS NOT NULL
+GROUP BY 
+    t.room_type
+ORDER BY 
+    t.room_type;
+
 
 /*
 RoomType			Totalhosts	Superhosts	PercentSuperhosts
@@ -999,101 +1448,111 @@ Shared room			208			39			18.75%
 --------------------------------------------------------------------------------------------------
 
 --Checking availability
-select Superhost, 
-avg(availability_30) as a30,avg(availability_60) as a60, avg(availability_90) as a90, avg(availability_365) as ay
-from
+SELECT 
+    Superhost, 
+    AVG(availability_30) AS a30,
+    AVG(availability_60) AS a60,
+    AVG(availability_90) AS a90,
+    AVG(availability_365) AS ay
+FROM
 (
-select * ,
-case
-	when host_is_superhost='f' then 0
-	else 1
-end as Superhost
-from DataAnalysis..['listings New York$']
-) as t
-inner join Review_table2 as rt2 on t.name=rt2.Name
-where rt2.Price>0 
-and Reviews>10
-and Score is not null
-and availability_30>0
-group by Superhost
+    SELECT 
+        *,
+        CASE
+            WHEN host_is_superhost = 'f' THEN 0
+            ELSE 1
+        END AS Superhost
+    FROM 
+        DataAnalysis..['listings New York$']
+) AS t
+INNER JOIN 
+    Review_table2 AS rt2 ON t.name = rt2.Name
+WHERE 
+    rt2.Price > 0 
+    AND Reviews > 10
+    AND Score IS NOT NULL
+    AND availability_30 > 0
+GROUP BY 
+    Superhost;
 
 
 --Displaying the range, count of scores & percent of count of scores
 
-select range, case when count(*)=0 then 0 else count(*) end as 'Count', concat(round(cast(count(*)*100 as float)/sum(count(*)) over(),2),'%') as 'Percent'
-from
-(
-select 
-case 
-	when Score>=0 and Score<1 then '0-1'
-	when Score>=1 and Score<2 then '1-2'
-	when Score>=2 and Score<3 then '2-3'
-	when Score>=3 and Score<4 then '3-4'
-	when Score>=4 and Score<5 then '4-5'
-	when Score=5 then '5'
-end as range
-from DataAnalysis..['listings New York$'] t
-left outer join Review_table2 as rt2 on t.name=rt2.Name
-where rt2.Price>0
-and Reviews>10
-and Score is not null
-) t2
-group by range
-order by range
+      
+
 
 
 --FOR VISUALIZATIONS PURPOSES
 -----------------------------
+-- Drop and create Vtable1
+DROP TABLE IF EXISTS Vtable1;
+CREATE TABLE Vtable1(
+    category VARCHAR(200),
+    Units INT,
+    MinPrice FLOAT,
+    MaxPrice FLOAT,
+    AvgPrice FLOAT
+);
 
-drop table if exists Vtable1
-create table Vtable1(
-category varchar(200),
-Units int,
-MinPrice float,
-MaxPrice float,
-AvgPrice float
+-- Populate Vtable1
+INSERT INTO Vtable1
+SELECT 
+    property_type, 
+    COUNT(property_type),
+    MIN(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    MAX(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)),
+    ROUND(AVG(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2)
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+GROUP BY 
+    property_type;
+
+-- Display Vtable1 contents
+SELECT * FROM Vtable1;
+
+-- Retrieve neighborhood statistics
+WITH NeighborhoodStats AS (
+    SELECT 
+        neighbourhood_group_cleansed,
+        neighbourhood_cleansed,
+        AVG(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)) OVER (PARTITION BY neighbourhood_cleansed ORDER BY neighbourhood_group_cleansed) AS avgp, 
+        AVG(review_scores_rating) OVER (PARTITION BY neighbourhood_cleansed ORDER BY neighbourhood_group_cleansed) AS scores,  
+        SUM(number_of_reviews) OVER (PARTITION BY neighbourhood_cleansed ORDER BY neighbourhood_group_cleansed) AS rev
+    FROM 
+        DataAnalysis..['listings New York$']
+    WHERE 
+        CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+        AND review_scores_rating > 0
 )
 
-insert into Vtable1
-select property_type, 
-count(property_type),
-min(cast(replace(substring(price,2,10),',','') as float)),
-max(cast(replace(substring(price,2,10),',','') as float)),
-Round(AVG(cast(replace(substring(price,2,10),',','') as float)),2)
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
-group by property_type 
+-- Display neighborhood statistics
+SELECT 
+    neighbourhood_group_cleansed,
+    neighbourhood_cleansed,
+    COUNT(*) AS Listings,
+    ROUND(MIN(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2) AS minp,
+    ROUND(MAX(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2) AS maxp,
+    ROUND(AVG(CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT)), 2) AS avgp,
+    ROUND(MIN(review_scores_rating), 2) AS minscores, 
+    ROUND(MAX(review_scores_rating), 2) AS maxscores, 
+    ROUND(AVG(review_scores_rating), 2) AS avgscores, 
+    SUM(number_of_reviews) AS rev,
+    SUM(accommodates) AS acc
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+    AND review_scores_rating > 0
+    AND accommodates <> 0
+GROUP BY 
+    neighbourhood_group_cleansed, 
+    neighbourhood_cleansed
+ORDER BY 
+    neighbourhood_group_cleansed, 
+    neighbourhood_cleansed;
 
-select * from Vtable1
-
-select neighbourhood_group_cleansed, neighbourhood_cleansed,
-avg(cast(replace(substring(price,2,10),',','') as float)) over (partition by  neighbourhood_cleansed order by neighbourhood_group_cleansed) as avgp, 
-avg(review_scores_rating) over (partition by  neighbourhood_cleansed order by neighbourhood_group_cleansed) as scores,  
-sum(number_of_reviews) over (partition by  neighbourhood_cleansed order by neighbourhood_group_cleansed) as rev
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
---and neighbourhood_cleansed='Allerton'
-and review_scores_rating>0
-
-select 
-neighbourhood_group_cleansed,
-neighbourhood_cleansed,
-count(*) as Listings,
-round(min(cast(replace(substring(price,2,10),',','') as float)),2) as minp,
-round(max(cast(replace(substring(price,2,10),',','') as float)),2) as maxp,
-round(avg(cast(replace(substring(price,2,10),',','') as float)),2) as avgp,
-round(min(review_scores_rating),2)  as minscores, 
-round(max(review_scores_rating),2)  as maxscores, 
-round(avg(review_scores_rating),2)  as avgscores, 
-sum(number_of_reviews) as rev,
-sum(accommodates) as acc
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
---and neighbourhood_cleansed='Allerton'
-and review_scores_rating>0
-and accommodates<>0
-group by neighbourhood_group_cleansed, neighbourhood_cleansed
-order by neighbourhood_group_cleansed, neighbourhood_cleansed
 
 
 --Changing data as per locations file for Tableau
@@ -1252,106 +1711,156 @@ group by neighbourhood_group_cleansed, t.NeighbourhoodArea
 order by neighbourhood_group_cleansed, t.NeighbourhoodArea
 
 --Details
-select *, cast(replace(substring(price,2,10),',','') as float) as Pricing
-from DataAnalysis..['listings New York$']
-where cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
+-- Details for Neighbourhood groups
+WITH CleanedListings AS (
+    SELECT 
+        *,
+        CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) AS Pricing
+    FROM 
+        DataAnalysis..['listings New York$']
+    WHERE 
+        CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+        AND review_scores_rating > 0
+)
 
---Details for Neighbourhood groups
-select  neighbourhood_group_cleansed, count(*) as 'Listings',sum(accommodates) as Accomodations,sum(number_of_reviews) as 'Reviews'
-,round(avg(review_scores_rating),2) as 'Average Ratings',concat('$',round(avg(Pricing),2)) as 'Average Pricing'
-from 
-(
-select *,cast(replace(substring(price,2,10),',','') as float) as Pricing from DataAnalysis..['listings New York$']
-) t
-where Pricing>0
-and review_scores_rating is not null
-group by neighbourhood_group_cleansed
+SELECT  
+    neighbourhood_group_cleansed,
+    COUNT(*) AS Listings,
+    SUM(accommodates) AS Accomodations,
+    SUM(number_of_reviews) AS Reviews,
+    ROUND(AVG(review_scores_rating), 2) AS Average_Ratings,
+    CONCAT('$', ROUND(AVG(Pricing), 2)) AS Average_Pricing
+FROM 
+    CleanedListings
+GROUP BY 
+    neighbourhood_group_cleansed;
+
 
 
 --Listings info
-select host_id, host_name,isnull(name,' - ') as name, isnull(neighborhood_overview,' - ') as neighborhood_overview, neighbourhood_cleansed, neighbourhood_group_cleansed, 
-cast(replace(substring(price,2,10),',','') as float) as Price, property_type, room_type
-, case 
-	when host_is_superhost='t' then 'Superhost'
-	when host_is_superhost='f' then 'Not Superhost'
-end as Superhost
-, review_scores_rating, 
-latitude, longitude, accommodates
-,cast(
-isnull(
-replace(bathrooms_text,
-(substring(bathrooms_text,PATINDEX('%[a-z]%',bathrooms_text),len(bathrooms_text))),
-'')
-,0) as float) as Bathrooms 
-, isnull(bedrooms,0) as bedrooms, minimum_nights, maximum_nights
-, review_scores_accuracy, review_scores_checkin, review_scores_cleanliness, review_scores_communication, review_scores_location, review_scores_value, number_of_reviews
-, listing_url
-from DataAnalysis..['listings New York$']
-where
-cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
-and host_name is not null
-order by Superhost
+SELECT 
+    host_id, 
+    host_name,
+    ISNULL(name, ' - ') AS name, 
+    ISNULL(neighborhood_overview, ' - ') AS neighborhood_overview, 
+    neighbourhood_cleansed, 
+    neighbourhood_group_cleansed, 
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) AS Price, 
+    property_type, 
+    room_type,
+    CASE 
+        WHEN host_is_superhost = 't' THEN 'Superhost'
+        WHEN host_is_superhost = 'f' THEN 'Not Superhost'
+    END AS Superhost,
+    review_scores_rating, 
+    latitude, 
+    longitude, 
+    accommodates,
+    CAST(
+        ISNULL(
+            REPLACE(
+                bathrooms_text,
+                (SUBSTRING(bathrooms_text, PATINDEX('%[a-z]%', bathrooms_text), LEN(bathrooms_text))),
+                ''
+            ),
+            0
+        ) AS FLOAT
+    ) AS Bathrooms, 
+    ISNULL(bedrooms, 0) AS bedrooms, 
+    minimum_nights, 
+    maximum_nights,
+    review_scores_accuracy, 
+    review_scores_checkin, 
+    review_scores_cleanliness, 
+    review_scores_communication, 
+    review_scores_location, 
+    review_scores_value, 
+    number_of_reviews,
+    listing_url
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+    AND review_scores_rating > 0
+    AND host_name IS NOT NULL
+ORDER BY 
+    Superhost;
 
-select host_id, count(*) as listings from DataAnalysis..['listings New York$']
-where
-cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
-group by host_id
-order by count(*) desc
+SELECT 
+    host_id, 
+    COUNT(*) AS listings 
+FROM 
+    DataAnalysis..['listings New York$']
+WHERE
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+    AND review_scores_rating > 0
+GROUP BY 
+    host_id
+ORDER BY 
+    COUNT(*) DESC;
+SELECT 
+    CAST(SUM(listings) AS DECIMAL(10, 3)) * 100 AS sumof4percent
+FROM (
+    SELECT 
+        host_id, 
+        COUNT(*) AS listings,
+        NTILE(25) OVER (ORDER BY COUNT(*) DESC) AS quartile
+    FROM 
+        DataAnalysis..['listings New York$']
+    WHERE
+        CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+        AND review_scores_rating > 0
+    GROUP BY 
+        host_id
+) AS t
+WHERE
+    quartile <= 1;
 
-
-select
-cast(
-(
-select sum(listings) as sumof4percent
-from 
-(
-select top 4 percent count(*) as listings from DataAnalysis..['listings New York$']
-where
-cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
-group by host_id
-order by count(*) desc
-) t
-) as decimal(10,3))*100
 /
+SELECT 
+    SUM(Tlistings) AS sumof100percent
+FROM (
+    SELECT 
+        TOP 100 PERCENT
+        COUNT(*) AS Tlistings 
+    FROM 
+        DataAnalysis..['listings New York$']
+    WHERE
+        CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+        AND review_scores_rating > 0
+    GROUP BY 
+        host_id
+    ORDER BY 
+        COUNT(*) DESC
+) AS t1;
+
+-- Percentage of listings with count > 3
+SELECT CAST(COUNT(*) AS DECIMAL(10,3)) / 20065 AS percent
+FROM DataAnalysis..['listings New York$']
+WHERE
+    CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+    AND review_scores_rating > 0
+GROUP BY
+    host_id
+HAVING
+    COUNT(*) > 3
+ORDER BY
+    COUNT(*) DESC;
+
+-- Calculated percentages
+SELECT CAST(3110 AS DECIMAL(10,3)) / 20065 AS percent1;
+SELECT CAST(1198 AS DECIMAL(10,3)) / 20065 AS percent2;
+SELECT CAST(624 AS DECIMAL(10,3)) / 20065 AS percent3;
+
+
+SELECT SUM(listings)
+FROM
 (
-select sum(Tlistings) as sumof100percent
-from
-(
-select top 100 percent count(*) as Tlistings from DataAnalysis..['listings New York$']
-where
-cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
-group by host_id
-order by count(*) desc
-) t1
-) as 'percent'
-
-select host_id, count(*) as listings from DataAnalysis..['listings New York$']
-where
-cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
-group by host_id
-having count(*)>3
-order by count(*) desc
-
-SELECT cast(3110 AS DECIMAL(10,3))/20065 -- >1
-SELECT cast(1198 AS DECIMAL(10,3))/20065--  >2
-SELECT cast(624 AS DECIMAL(10,3))/20065--  >3
-
-select sum(listings)
-from
-(
-select count(*) as listings from DataAnalysis..['listings New York$']
-where
-cast(replace(substring(price,2,10),',','') as float)>0
-and review_scores_rating>0
-group by host_id
-having count(*)>0
---order by count(*) desc
-) t
-
-SELECT cast(5366 AS DECIMAL(10,3))/27867--  >3
+    SELECT COUNT(*) AS listings
+    FROM DataAnalysis..['listings New York$']
+    WHERE
+        CAST(REPLACE(SUBSTRING(price, 2, 10), ',', '') AS FLOAT) > 0
+        AND review_scores_rating > 0
+    GROUP BY host_id
+    HAVING COUNT(*) > 0
+) t;
